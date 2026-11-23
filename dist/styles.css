@@ -46,6 +46,7 @@ nav button[aria-current] { background: white; color: var(--forest); box-shadow: 
 .button.primary { background: var(--green); color: white; }
 .button.lime { background: var(--lime); color: #153422; padding-inline: 18px; }
 .button.outline { border-color: var(--line); background: white; }
+.button.member-edit { flex-shrink: 0; }
 .button.danger { color: #982e27; background: #fff2f0; }
 .button.icon-only { width: 46px; flex: 0 0 46px; padding: 0; }
 .button.ghost { background: transparent; padding-inline: 8px; }

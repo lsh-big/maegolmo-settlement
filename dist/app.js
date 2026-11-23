@@ -144,14 +144,18 @@ function roundRow(round) {
 
 function members() {
   return `<section class="stack">
-    <div class="page-head"><h1>회원 명단</h1><p class="muted">저장된 회원을 다음 회차에서 다시 선택할 수 있어요. 계좌는 선택 사항입니다.</p></div>
+    <div class="page-head"><h1>회원 명단</h1><p class="muted">회원의 이름과 송금 계좌를 수정하거나 새 회원을 등록하세요.</p></div>
     <div class="section-heading"><h2>등록 회원 <span class="chip">${state.members.length}명</span></h2>${button('회원 추가', 'member-add', 'primary', 'plus')}</div>
     ${state.members.length ? `<div class="card">${state.members.map(member => `<div class="person-row spread">
       <div><strong>${escape(member.name)}</strong><p class="small muted">${escape(account(member) || '계좌 미등록')}</p></div>
-      ${button('수정', 'member-edit', 'outline', 'edit', `data-id="${member.id}" aria-label="${escape(member.name)} 회원 수정"`)}
+      ${memberEditButton(member.id, escape(member.name))}
     </div>`).join('')}</div>` : `<div class="card empty"><span class="tile">${icon('users')}</span><strong>등록된 회원이 없어요</strong>
       <p class="muted small">여기서 회원을 추가하거나 새 회차에서 참석자를 등록하세요.</p></div>`}
   </section>`;
+}
+
+function memberEditButton(memberId, name) {
+  return button('정보 수정', 'member-edit', 'outline member-edit', 'edit', `data-id="${memberId}" aria-label="${name} 회원 정보 수정"`);
 }
 
 function newRound() {
@@ -198,8 +202,14 @@ function detail() {
         </section>
         <section class="card stack" aria-labelledby="people-title">
           <h2 id="people-title">참석자별 금액</h2>
-          <div>${round.people.map(person => `<div class="person-row spread"><strong>${personName(round, person.id)} ${!person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
-            <span class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</span></div>`).join('')}</div>
+          <div>${round.people.map(person => {
+            const name = personName(round, person.id);
+            const edit = person.memberId ? memberEditButton(person.memberId, name) : '';
+            return `<div class="person-row spread"><div>
+              <strong>${name} ${!person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
+              <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
+            </div>${edit}</div>`;
+          }).join('')}</div>
         </section>
       </div>
       <section class="card" aria-labelledby="transfers-title">

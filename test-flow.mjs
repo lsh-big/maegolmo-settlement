@@ -194,7 +194,28 @@ try {
   assert.equal(stored.members.length, 4);
   assert.deepEqual(stored.rounds[0].people.map(person => person.name), ['미키', '하루손님']);
   assert.match(await content(), /하루손님 게스트/);
-  console.log('PASS: mobile layout, attendee entry and reuse, expenses and custom shares, clipboard, receipts, edit reconciliation, reload, demo isolation.');
+
+  await click('[aria-label="미키 회원 정보 수정"]');
+  assert.equal(await run("document.querySelector('#dialog [name=account]').value"), 'TEST-ONLY');
+  await fill('#dialog [name=name]', '민수');
+  await click('#dialog [type=submit]');
+  assert.match(await content('#dialog'), /같은 이름의 회원이 이미 있습니다/);
+  await fill('#dialog [name=name]', '미키버디');
+  await fill('#dialog [name=bank]', '가상은행2');
+  await click('#dialog [type=submit]');
+  assert.match(await content(), /미키버디/);
+  assert.equal((await records()).members.length, 4);
+  await page.send('Page.reload');
+  await retry(() => run("document.querySelectorAll('[data-action=round]').length === 2"));
+  await click('[data-tab=members]');
+  assert.match(await content(), /미키버디\s+가상은행2 TEST-ONLY/);
+  await click('[data-tab=rounds]');
+  await click('[data-action=round]:last-child');
+  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
+  await click('[data-tab=rounds]');
+  await click('[data-action=new-round]');
+  assert.match(await content('#round-form'), /미키버디/);
+  console.log('PASS: mobile layout, attendee entry and reuse, member rename and account editing, expenses and custom shares, clipboard, receipts, edit reconciliation, reload, demo isolation.');
 } finally {
   page?.close();
   browser?.close();
