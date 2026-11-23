@@ -217,7 +217,7 @@ function detail() {
           <div>${round.people.map(person => {
             const name = personName(round, person.id);
             const edit = person.memberId ? memberEditButton(person.memberId, name) : '';
-            return `<div class="person-row" data-person="${person.id}"><div class="spread"><div>
+            return `<div class="person-row attendee-amount" data-person="${person.id}"><div class="spread"><div>
                 <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : !person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
                 <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
               </div>${edit}</div>
