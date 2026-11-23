@@ -70,6 +70,8 @@ try {
   browser = await connect(`ws://127.0.0.1:${port}${browserPath}`);
   const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   page = await connect(pages.find(item => item.type === 'page').webSocketDebuggerUrl);
+  await page.send('Page.bringToFront');
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await browser.send('Browser.grantPermissions', { origin: url, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await page.send('Page.navigate', { url });
@@ -151,8 +153,13 @@ try {
   await click('[data-tab=rounds]');
   await click('[data-action=round]');
   await click('[data-action=copy]');
-  await retry(() => run("document.querySelector('#toast').textContent.includes('카톡 공지를 복사')"));
-  const clipboard = await run('navigator.clipboard.readText()');
+  const copied = await retry(() => run(`document.querySelector('#toast').textContent.includes('카톡 공지를 복사')
+    ? 'copied' : document.querySelector('.statement') ? 'fallback' : ''`));
+  if (copied === 'fallback') {
+    const reason = await run("navigator.clipboard.writeText('clipboard check').then(() => 'write succeeded', error => error.message)");
+    assert.fail(`Clipboard rejected the write: ${reason}`);
+  }
+  const clipboard = (await run('navigator.clipboard.readText()')).replaceAll('\r\n', '\n');
   assert.match(clipboard, /1차 식사 100,003원 \(결제 미키\)/);
   assert.match(clipboard, /2차 술자리 50,001원 \(결제 민수\)/);
   assert.match(clipboard, /총 지출 150,004원/);
