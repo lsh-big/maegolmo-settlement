@@ -29,6 +29,7 @@ const button = (label, action, style = '', symbol = '', extra = '') =>
   `<button type="button" class="button ${style}" data-action="${action}" ${extra}>${symbol ? icon(symbol) : ''}${label}</button>`;
 const dateLabel = date => date.replaceAll('-', '. ');
 const currentRound = () => view.id === 'demo' ? state.demo ?? demoRound() : state.rounds.find(round => round.id === view.id);
+const attending = round => round.people.filter(person => !person.inactive);
 const getPerson = (round, person) => personInfo(round, state.members, person);
 const personName = (round, person) => escape(getPerson(round, person).name);
 const storageNotice = `<footer class="foot">${icon('lock')} 회원과 정산 기록은 현재 브라우저에 저장됩니다.</footer>`;
@@ -85,7 +86,7 @@ function render() {
     if (active) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
-  const pages = { home, members, detail, 'new-round': newRound };
+  const pages = { home, members, detail, 'new-round': roundForm, 'edit-roster': () => roundForm(currentRound()) };
   main.innerHTML = (loadError ? `<p class="notice" role="alert">${escape(loadError)}</p>` : '') + pages[view.type]() + storageNotice;
 }
 
@@ -137,7 +138,7 @@ function roundRow(round) {
   const status = pending.length ? `미입금 ${pending.length}건` : round.expenses.length ? '정산 완료' : '지출 등록 전';
   return `<button type="button" class="card round-row" data-action="round" data-id="${round.id}">
     <span class="tile">${icon('calendar')}</span>
-    <span class="round-main"><strong>${escape(round.title)}</strong><small class="muted small">${dateLabel(round.date)} · ${round.people.length}명</small></span>
+    <span class="round-main"><strong>${escape(round.title)}</strong><small class="muted small">${dateLabel(round.date)} · ${attending(round).length}명</small></span>
     <span class="row-end"><strong>${won(total)}</strong><small><span class="chip ${pending.length ? 'waiting' : ''}">${status}</span></small></span>
   </button>`;
 }
@@ -158,14 +159,21 @@ function memberEditButton(memberId, name) {
   return button('정보 수정', 'member-edit', 'outline member-edit', 'edit', `data-id="${memberId}" aria-label="${name} 회원 정보 수정"`);
 }
 
-function newRound() {
+function roundForm(round) {
+  const available = state.members.filter(member => !round?.people.some(person => person.memberId === member.id));
+  const back = round ? button('회차로 돌아가기', 'round', 'outline', 'calendar', `data-id="${round.id}"`) :
+    button('회차 목록', 'home', 'outline', 'calendar');
   return `<section class="stack">
-    <div class="page-head">${button('회차 목록', 'home', 'outline', 'calendar')}<h1>새 회차</h1></div>
+    <div class="page-head">${back}<h1>${round ? '참석자 변경' : '새 회차'}</h1>${round ? `<p class="muted">${escape(round.title)}</p>` : ''}</div>
     <form id="round-form" class="card form" autocomplete="off">
-      <label class="field">모임 이름<input name="title" type="text" placeholder="예: 11월 라운딩 뒤풀이" maxlength="80" required></label>
-      <label class="field">날짜<input name="date" type="date" value="${today()}" required></label>
+      ${round ? `<fieldset><legend>회차에 등록된 참석자</legend><div class="check-grid">${round.people.map(person =>
+        `<label class="checkline"><input type="checkbox" name="people" value="${person.id}" ${person.inactive ? '' : 'checked'}>
+          <span>${personName(round, person.id)} ${person.memberId ? '' : '<span class="chip">게스트</span>'}</span></label>`).join('')}</div></fieldset>
+        ${round.expenses.length || round.receipts.length ? '<p class="notice">등록한 지출의 결제자나 분담 인원도 바꾸려면 회차로 돌아가 각 지출의 수정 버튼을 누르세요. 완료된 입금은 실제 정산에 계속 반영됩니다.</p>' : ''}` :
+        `<label class="field">모임 이름<input name="title" type="text" placeholder="예: 11월 라운딩 뒤풀이" maxlength="80" required></label>
+        <label class="field">날짜<input name="date" type="date" value="${today()}" required></label>`}
       <fieldset><legend>저장된 회원</legend>
-        ${state.members.length ? `<div class="check-grid">${state.members.map(member =>
+        ${available.length ? `<div class="check-grid">${available.map(member =>
           `<label class="checkline"><input type="checkbox" name="members" value="${member.id}">${escape(member.name)}</label>`).join('')}</div>` :
           '<p class="muted small">아래에서 새 참석자를 바로 등록할 수 있어요.</p>'}
       </fieldset>
@@ -175,7 +183,8 @@ function newRound() {
         <div id="new-people"></div>
       </fieldset>
       <p class="form-error" role="alert" hidden></p>
-      <div class="actions">${button('취소', 'home', 'outline')}<button class="button primary" type="submit">회차 저장</button></div>
+      <div class="actions">${round ? button('취소', 'round', 'outline', '', `data-id="${round.id}"`) : button('취소', 'home', 'outline')}
+        <button class="button primary" type="submit">${round ? '참석자 저장' : '회차 저장'}</button></div>
     </form>
   </section>`;
 }
@@ -186,7 +195,8 @@ function detail() {
   return `<section class="stack">
     <div class="page-head">${button('회차 목록', 'home', 'outline', 'calendar')}
       <div class="spread"><h1>${escape(round.title)}</h1>${round.demo ? '<span class="chip demo">시연용</span>' : ''}</div>
-      <p class="muted">${dateLabel(round.date)} · 참석자 ${round.people.length}명</p>
+      <div class="spread"><p class="muted">${dateLabel(round.date)} · 참석자 ${attending(round).length}명</p>
+        ${round.demo ? '' : button('참석자 변경', 'edit-roster', 'outline', 'users', `data-id="${round.id}"`)}</div>
     </div>
     <div class="detail-banner">
       <div><span>총 지출</span><strong>${won(total)}</strong></div>
@@ -206,7 +216,7 @@ function detail() {
             const name = personName(round, person.id);
             const edit = person.memberId ? memberEditButton(person.memberId, name) : '';
             return `<div class="person-row spread"><div>
-              <strong>${name} ${!person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
+              <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : !person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
               <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
             </div>${edit}</div>`;
           }).join('')}</div>
@@ -257,7 +267,8 @@ function addNames(form) {
   const names = splitNames(input.value);
   const known = new Set([
     ...[...form.querySelectorAll('.new-name')].map(field => field.value),
-    ...state.members.filter(member => [...form.querySelectorAll('[name="members"]:checked')].some(field => field.value === member.id)).map(member => member.name),
+    ...new FormData(form).getAll('members').map(memberId => state.members.find(member => member.id === memberId).name),
+    ...new FormData(form).getAll('people').map(personId => getPerson(currentRound(), personId).name),
   ].map(nameKey));
   let repeats = 0;
   for (const name of names) {
@@ -280,17 +291,25 @@ function addNames(form) {
 function submitRound(form) {
   addNames(form);
   const data = new FormData(form);
-  const title = data.get('title').trim();
+  const original = view.type === 'edit-roster' ? currentRound() : null;
+  const title = original?.title ?? data.get('title').trim();
   if (!title) throw new Error('모임 이름을 입력해 주세요.');
   const people = [];
   const nextMembers = [...state.members];
   const used = new Set();
-  function addPerson(name, member) {
+  function addPerson(name, member, existing) {
     const key = nameKey(name);
     if (!key) throw new Error('참석자 이름을 입력하거나 빈 참석자를 빼 주세요.');
     if (used.has(key)) throw new Error(`‘${name}’ 참석자가 두 번 선택되었습니다.`);
     used.add(key);
-    people.push({ id: id(), name, ...(member ? { memberId: member.id } : {}) });
+    const previous = existing ?? original?.people.find(person =>
+      (member && person.memberId === member.id) || nameKey(getPerson(original, person.id).name) === key);
+    const memberId = member?.id ?? previous?.memberId;
+    people.push({ id: previous?.id ?? id(), name, ...(memberId ? { memberId } : {}) });
+  }
+  for (const personId of data.getAll('people')) {
+    const person = original.people.find(entry => entry.id === personId);
+    addPerson(getPerson(original, personId).name, undefined, person);
   }
   for (const memberId of data.getAll('members')) {
     const member = nextMembers.find(entry => entry.id === memberId);
@@ -310,10 +329,28 @@ function submitRound(form) {
     addPerson(member.name, member);
   }
   if (!people.length) throw new Error('참석자를 한 명 이상 등록해 주세요.');
-  const round = { id: id(), title, date: data.get('date'), people, expenses: [], receipts: [] };
-  persist({ ...state, members: nextMembers, rounds: [round, ...state.rounds] });
+  const round = original ? { ...original, people: mergeRoster(original, people) } :
+    { id: id(), title, date: data.get('date'), people, expenses: [], receipts: [] };
+  const rounds = original ? state.rounds.map(entry => entry.id === round.id ? round : entry) : [round, ...state.rounds];
+  persist({ ...state, members: nextMembers, rounds });
   go('detail', round.id);
-  notify('새 회차를 저장했어요.');
+  notify(original ? '참석자 변경을 저장했어요.' : '새 회차를 저장했어요.');
+}
+
+function mergeRoster(round, selected) {
+  const chosen = new Map(selected.map(person => [person.id, person]));
+  const referenced = new Set([
+    ...round.expenses.flatMap(expense => [expense.payer, ...expense.participants]),
+    ...round.receipts.flatMap(receipt => [receipt.from, receipt.to]),
+  ]);
+  const previous = new Set(round.people.map(person => person.id));
+  return [
+    ...round.people.flatMap(person => {
+      const active = chosen.get(person.id);
+      return active ? [active] : referenced.has(person.id) ? [{ ...person, inactive: true }] : [];
+    }),
+    ...selected.filter(person => !previous.has(person.id)),
+  ];
 }
 
 function openDialog(title, content, formType = '') {
@@ -357,19 +394,21 @@ function submitMember(form) {
 function expenseEditor(expenseId) {
   const round = currentRound();
   const expense = round.expenses.find(entry => entry.id === expenseId);
+  const eligiblePayers = round.people.filter(person => !person.inactive || person.id === expense?.payer);
+  const eligibleParticipants = round.people.filter(person => !person.inactive || expense?.participants.includes(person.id));
   openDialog(expense ? '지출 수정' : '지출 추가', `
     <input type="hidden" name="id" value="${expense?.id ?? ''}">
     <label class="field">항목 이름<input name="title" type="text" value="${escape(expense?.title)}" maxlength="80" placeholder="예: 1차 식사" required autofocus></label>
     <label class="field">지출 금액 (원)<input name="amount" type="text" inputmode="numeric" value="${expense?.amount ?? ''}" placeholder="예: 120000" required></label>
     <label class="field">먼저 결제한 사람<select name="payer" required>
-      <option value="">선택해 주세요</option>${round.people.map(person =>
-        `<option value="${person.id}" ${expense?.payer === person.id ? 'selected' : ''}>${personName(round, person.id)}</option>`).join('')}
+      <option value="">선택해 주세요</option>${eligiblePayers.map(person =>
+        `<option value="${person.id}" ${expense?.payer === person.id ? 'selected' : ''}>${personName(round, person.id)}${person.inactive ? ' (이전 참석자)' : ''}</option>`).join('')}
     </select></label>
     <fieldset><legend>나눠 낼 사람</legend><p class="muted small">빈 부담액은 균등 분할됩니다. 0원을 지정할 수도 있어요.</p>
-      ${round.people.map(person => {
+      ${eligibleParticipants.map(person => {
         const selected = expense ? expense.participants.includes(person.id) : true;
         return `<div class="split-row">
-          <label class="checkline"><input type="checkbox" name="participants" value="${person.id}" ${selected ? 'checked' : ''}>${personName(round, person.id)}</label>
+          <label class="checkline"><input type="checkbox" name="participants" value="${person.id}" ${selected ? 'checked' : ''}><span>${personName(round, person.id)} ${person.inactive ? '<span class="chip">이전 참석자</span>' : ''}</span></label>
           <label class="field"><input type="text" name="share-${person.id}" inputmode="numeric" aria-label="${personName(round, person.id)} 부담액" placeholder="균등 분할" value="${expense?.overrides[person.id] ?? ''}" ${selected ? '' : 'disabled'}></label>
         </div>`;
       }).join('')}
@@ -438,6 +477,7 @@ const actions = {
   home: () => go('home'),
   members: () => go('members'),
   'new-round': () => go('new-round'),
+  'edit-roster': item => go('edit-roster', item),
   demo: () => go('detail', 'demo'),
   round: item => go('detail', item),
   'names-add': () => {
