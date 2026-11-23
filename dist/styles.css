@@ -97,8 +97,9 @@ summary { cursor: pointer; color: var(--green); padding: 6px 0; }
 ul.participation-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .participation-list li { padding: 4px 9px; border-radius: 8px; background: #edf3e9; color: var(--forest); font-size: .875rem; }
 .participation-list small { font-size: inherit; color: var(--muted); }
-.transfer { display: grid; gap: 7px; }
-.transfer .button { justify-self: start; }
+.transfer { display: grid; gap: 4px; padding-block: 8px; font-size: .875rem; }
+.transfer .small { font-size: .8125rem; }
+.transfer .button { justify-self: start; font-size: inherit; }
 .transfer strong { color: var(--green); }
 .transfers { margin-top: 10px; }
 .form { display: grid; gap: 16px; }
