@@ -43,11 +43,13 @@ export function allocate(total, participantIds, overrides) {
 
 export function calculate(round) {
   const people = Object.fromEntries(round.people.map(({ id: person }) => [person, { paid: 0, share: 0, received: 0, sent: 0 }]));
+  const expenseShares = new Map();
   let total = 0;
   for (const expense of round.expenses) {
     total += expense.amount;
     people[expense.payer].paid += expense.amount;
     const shares = allocate(expense.amount, expense.participants, expense.overrides);
+    expenseShares.set(expense.id, shares);
     for (const [person, amount] of Object.entries(shares)) people[person].share += amount;
   }
   for (const { from, to, amount } of round.receipts) {
@@ -75,7 +77,7 @@ export function calculate(round) {
     if (!debtor.balance) sender++;
     if (!creditor.balance) recipient++;
   }
-  return { people, total, pending, remaining: pending.reduce((sum, item) => sum + item.amount, 0) };
+  return { people, expenseShares, total, pending, remaining: pending.reduce((sum, item) => sum + item.amount, 0) };
 }
 
 export function personInfo(round, members, personId) {

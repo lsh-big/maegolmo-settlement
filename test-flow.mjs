@@ -142,6 +142,9 @@ try {
   assert.match(await content('.detail-banner'), /150,004원/);
   assert.match(await content('.detail-banner'), /75,002원/);
   assert.match(await content('.transfers'), /민수 → 미키 10,001원/);
+  assert.match(await content(`[data-person="${first}"] .participation-list`), /1차 식사 부담 25,001원 · 결제자[\s\S]*2차 술자리 부담 0원/);
+  assert.match(await content(`[data-person="${second}"] .participation-list`), /2차 술자리 부담 35,001원 · 결제자/);
+  assert.doesNotMatch(await content(`[data-person="${fourth}"] .participation-list`), /2차 술자리/);
   await assertMobileWidth();
 
   await click('[data-tab=members]');
@@ -254,7 +257,21 @@ try {
   await click('[data-action=round]:last-child');
   assert.match(await content(), /참석자 3명/);
   assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
-  console.log('PASS: mobile layout, member editing, roster changes after expenses and payments, expense participation and custom shares, clipboard, receipts, reload, demo isolation.');
+  assert.match(await content(`[data-person="${added.id}"] .participation-list`), /2차 술자리 부담 25,000원/);
+  assert.doesNotMatch(await content(`[data-person="${third}"] .participation-list`), /2차 술자리/);
+
+  await click('[data-action=expense-add]');
+  await click('[data-action=expense-open]');
+  await fill('[name=title]', '3차 간식');
+  await fill('[name=amount]', '5000');
+  await fill('[name=payer]', second);
+  await click(`[name=participants][value="${second}"]`);
+  await click(`[name=participants][value="${fourth}"]`);
+  await saveExpense();
+  assert.match(await content(`[data-person="${second}"] .participation-list`), /3차 간식 결제만/);
+  assert.match(await content(`[data-person="${added.id}"] .participation-list`), /3차 간식 부담 5,000원/);
+  await assertMobileWidth();
+  console.log('PASS: mobile layout, member editing, roster changes, per-person expense participation, custom shares, clipboard, receipts, reload, demo isolation.');
 } finally {
   page?.close();
   browser?.close();

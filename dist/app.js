@@ -191,7 +191,7 @@ function roundForm(round) {
 
 function detail() {
   const round = currentRound();
-  const { people, total, pending, remaining } = calculate(round);
+  const { people, expenseShares, total, pending, remaining } = calculate(round);
   return `<section class="stack">
     <div class="page-head">${button('회차 목록', 'home', 'outline', 'calendar')}
       <div class="spread"><h1>${escape(round.title)}</h1>${round.demo ? '<span class="chip demo">시연용</span>' : ''}</div>
@@ -208,17 +208,19 @@ function detail() {
         <section class="card stack" aria-labelledby="expenses-title">
           <div class="spread"><h2 id="expenses-title">지출 항목</h2>${button('지출 추가', 'expense-add', 'primary', 'plus')}</div>
           ${round.receipts.length ? '<p class="notice">입금 완료 내역이 있습니다. 지출 변경 시 실제 입금액을 반영해 남은 송금액을 다시 계산합니다.</p>' : ''}
-          <div>${round.expenses.length ? round.expenses.map(expense => expenseRow(round, expense)).join('') : '<p class="muted">아직 지출 항목이 없어요.</p>'}</div>
+          <div>${round.expenses.length ? round.expenses.map(expense => expenseRow(round, expense, expenseShares.get(expense.id))).join('') : '<p class="muted">아직 지출 항목이 없어요.</p>'}</div>
         </section>
         <section class="card stack" aria-labelledby="people-title">
           <h2 id="people-title">참석자별 금액</h2>
           <div>${round.people.map(person => {
             const name = personName(round, person.id);
             const edit = person.memberId ? memberEditButton(person.memberId, name) : '';
-            return `<div class="person-row spread"><div>
-              <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : !person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
-              <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
-            </div>${edit}</div>`;
+            return `<div class="person-row" data-person="${person.id}"><div class="spread"><div>
+                <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : !person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
+                <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
+              </div>${edit}</div>
+              ${participationList(round.expenses, expenseShares, person.id)}
+            </div>`;
           }).join('')}</div>
         </section>
       </div>
@@ -235,8 +237,20 @@ function detail() {
   </section>`;
 }
 
-function expenseRow(round, expense) {
-  const shares = allocate(expense.amount, expense.participants, expense.overrides);
+function participationList(expenses, expenseShares, personId) {
+  if (!expenses.length) return '';
+  const entries = expenses.flatMap(expense => {
+    const share = expenseShares.get(expense.id)[personId];
+    const payer = expense.payer === personId;
+    if (share === undefined && !payer) return [];
+    const role = share === undefined ? '결제만' : `부담 ${won(share)}${payer ? ' · 결제자' : ''}`;
+    return [`<li><span>${escape(expense.title)}</span> <small>${role}</small></li>`];
+  });
+  return entries.length ? `<ul class="participation-list" aria-label="항목별 참석 내용">${entries.join('')}</ul>` :
+    '<p class="small muted participation-list">참여한 지출 항목이 없습니다.</p>';
+}
+
+function expenseRow(round, expense, shares) {
   return `<div class="expense-row"><div class="spread">
     <div><strong>${escape(expense.title)} · ${won(expense.amount)}</strong><p class="small muted">결제 ${personName(round, expense.payer)} · 분담 ${expense.participants.length}명</p></div>
     ${button('수정', 'expense-edit', 'outline', 'edit', `data-id="${expense.id}" aria-label="${escape(expense.title)} 수정"`)}

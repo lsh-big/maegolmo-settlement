@@ -93,6 +93,10 @@ nav button[aria-current] { background: white; color: var(--forest); box-shadow: 
 .expense-row details { margin-top: 6px; }
 summary { cursor: pointer; color: var(--green); padding: 6px 0; }
 .people-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.participation-list { margin: 8px 0 0; padding: 0; list-style: none; }
+ul.participation-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.participation-list li { padding: 4px 9px; border-radius: 8px; background: #edf3e9; color: var(--forest); font-size: .875rem; }
+.participation-list small { font-size: inherit; color: var(--muted); }
 .transfer { display: grid; gap: 7px; }
 .transfer .button { justify-self: start; }
 .transfer strong { color: var(--green); }
