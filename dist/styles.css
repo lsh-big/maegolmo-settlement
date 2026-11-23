@@ -123,6 +123,10 @@ dialog { padding: 0; border: 1px solid var(--line); border-radius: 19px; width: 
 dialog::backdrop { background: #10271eb3; }
 .modal { display: grid; gap: 15px; padding: 20px; }
 .modal h2 { letter-spacing: -.04em; }
+.photo-fields input[type="file"] { min-width: 0; width: 100%; min-height: 46px; font-size: .9rem; }
+.photo-fields input::file-selector-button { min-height: 44px; margin-inline-end: 8px; padding-inline: 10px; border: 1px solid var(--line); border-radius: 9px; background: #eef4ee; color: var(--forest); cursor: pointer; }
+.receipt-preview { display: grid; justify-items: center; min-width: 0; }
+.receipt-preview img { display: block; max-width: 100%; max-height: 65dvh; object-fit: contain; }
 .statement { width: 100%; min-height: 215px; }
 .toast { position: fixed; z-index: 5; inset: auto 12px 16px; margin: auto; width: fit-content; max-width: calc(100% - 24px); border-radius: 11px; padding: 11px 17px; background: var(--forest); color: white; box-shadow: 0 4px 20px #142c2142; }
 .toast:empty { display: none; }

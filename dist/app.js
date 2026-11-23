@@ -1,4 +1,5 @@
 import { STORAGE_KEY, won, id, nameKey, splitNames, today, allocate, calculate, personInfo, account, announcement, demoRound } from './settlement.js';
+import { saveReceiptPhoto, readReceiptPhoto, deleteReceiptPhoto } from './receipt-photos.js';
 
 const main = document.querySelector('#main');
 const dialog = document.querySelector('#dialog');
@@ -8,6 +9,7 @@ let saved = null;
 let loadError = '';
 let view = { type: 'home' };
 let toastTimer;
+let receiptPhotoUrl;
 
 const icons = {
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -32,7 +34,7 @@ const currentRound = () => view.id === 'demo' ? state.demo ?? demoRound() : stat
 const attending = round => round.people.filter(person => !person.inactive);
 const getPerson = (round, person) => personInfo(round, state.members, person);
 const personName = (round, person) => escape(getPerson(round, person).name);
-const storageNotice = `<footer class="foot">${icon('lock')} 회원과 정산 기록은 현재 브라우저에 저장됩니다.</footer>`;
+const storageNotice = `<footer class="foot">${icon('lock')} 회원, 정산 기록, 영수증 사진은 현재 브라우저에 저장됩니다.</footer>`;
 
 function read() {
   try {
@@ -256,7 +258,8 @@ function expenseRow(round, expense, shares) {
     ${button('수정', 'expense-edit', 'outline', 'edit', `data-id="${expense.id}" aria-label="${escape(expense.title)} 수정"`)}
   </div><details><summary class="small">부담액 보기</summary><div class="people-tags">
     ${expense.participants.map(person => `<span class="chip">${personName(round, person)} ${won(shares[person])}</span>`).join('')}
-  </div></details></div>`;
+  </div></details>${expense.receiptPhotoId ? button('영수증 보기', 'photo-view', 'outline', 'receipt',
+    `data-id="${expense.id}" aria-label="${escape(expense.title)} 영수증 보기"`) : ''}</div>`;
 }
 
 function transferRow(round, entry, index) {
@@ -427,13 +430,19 @@ function expenseEditor(expenseId) {
         </div>`;
       }).join('')}
     </fieldset>
+    <fieldset class="photo-fields">
+      <legend>영수증 사진 (선택)</legend>
+      <label class="field"><span class="small muted">${expense?.receiptPhotoId ? '새 사진을 선택하면 기존 사진을 교체합니다.' : '사진을 한 장 첨부할 수 있습니다.'}</span>
+        <input type="file" name="receipt-photo" accept="image/*"></label>
+      ${expense?.receiptPhotoId ? '<label class="checkline"><input type="checkbox" name="remove-receipt-photo">첨부 사진 삭제</label>' : ''}
+    </fieldset>
     <div class="actions">
       ${expense ? button('지출 삭제', 'expense-delete-prompt', 'danger', '', `data-id="${expense.id}"`) : ''}
       ${button('취소', 'close', 'outline')}<button class="button primary" type="submit">지출 저장</button>
     </div>`, 'expense');
 }
 
-function submitExpense(form) {
+async function submitExpense(form) {
   const round = currentRound();
   const data = new FormData(form);
   const title = data.get('title').trim();
@@ -447,15 +456,52 @@ function submitExpense(form) {
   }));
   allocate(amount, participants, overrides);
   const expenseId = data.get('id');
+  const previousPhotoId = round.expenses.find(entry => entry.id === expenseId)?.receiptPhotoId;
   const expense = { id: expenseId || id(), title, amount, payer: data.get('payer'), participants, overrides };
   const expenses = expenseId ? round.expenses.map(entry => entry.id === expenseId ? expense : entry) : [...round.expenses, expense];
   if (!Number.isSafeInteger(expenses.reduce((sum, entry) => sum + entry.amount, 0))) {
     throw new Error('회차의 총 지출이 계산 가능한 금액을 넘었습니다.');
   }
-  saveRound({ ...round, expenses });
+  const upload = data.get('receipt-photo');
+  const newPhotoId = upload.name ? id() : undefined;
+  const receiptPhotoId = newPhotoId ?? (data.has('remove-receipt-photo') ? undefined : previousPhotoId);
+  if (receiptPhotoId) expense.receiptPhotoId = receiptPhotoId;
+  if (newPhotoId) await saveReceiptPhoto(newPhotoId, upload);
+  try {
+    saveRound({ ...round, expenses });
+  } catch (error) {
+    discardPhoto(newPhotoId);
+    throw error;
+  }
+  if (previousPhotoId !== receiptPhotoId) discardPhoto(previousPhotoId);
   dialog.close();
   render();
   notify('지출을 저장했어요.');
+}
+
+function discardPhoto(photoId) {
+  if (photoId) void deleteReceiptPhoto(photoId).catch(() => {});
+}
+
+async function showReceiptPhoto(expenseId) {
+  const expense = currentRound().expenses.find(entry => entry.id === expenseId);
+  if (!expense?.receiptPhotoId) return;
+  openDialog('영수증 사진', `<p>${escape(expense.title)}</p>
+    <div class="receipt-preview" aria-live="polite">사진을 여는 중입니다.</div>
+    <div class="actions">${button('닫기', 'close', 'primary')}</div>`);
+  const preview = dialog.querySelector('.receipt-preview');
+  try {
+    const photo = await readReceiptPhoto(expense.receiptPhotoId);
+    if (!photo) throw new Error('Missing receipt photo');
+    if (!dialog.open || !preview.isConnected) return;
+    receiptPhotoUrl = URL.createObjectURL(photo);
+    const picture = document.createElement('img');
+    picture.alt = `${expense.title} 영수증 사진`;
+    picture.src = receiptPhotoUrl;
+    preview.replaceChildren(picture);
+  } catch {
+    preview.textContent = '저장된 영수증 사진을 열 수 없습니다.';
+  }
 }
 
 function confirmAction(title, message, label, action, itemId = '', style = 'primary') {
@@ -505,10 +551,13 @@ const actions = {
   'expense-add': () => beginExpense(),
   'expense-edit': item => beginExpense(item),
   'expense-open': item => expenseEditor(item),
+  'photo-view': item => showReceiptPhoto(item),
   'expense-delete-prompt': item => confirmAction('지출을 삭제할까요?', '이 항목이 빠진 금액으로 정산됩니다. 입금 완료 기록은 정산에 계속 반영됩니다.', '지출 삭제', 'expense-delete', item, 'danger'),
   'expense-delete': item => {
     const round = currentRound();
+    const photoId = round.expenses.find(entry => entry.id === item)?.receiptPhotoId;
     saveRound({ ...round, expenses: round.expenses.filter(entry => entry.id !== item) });
+    discardPhoto(photoId);
     dialog.close();
     render();
     notify('지출을 삭제했어요.');
@@ -543,16 +592,35 @@ document.addEventListener('click', event => {
   }
 });
 
-document.addEventListener('submit', event => {
+document.addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.target;
   try {
     if (form.id === 'round-form') submitRound(form);
     else if (form.dataset.form === 'member') submitMember(form);
-    else if (form.dataset.form === 'expense') submitExpense(form);
+    else if (form.dataset.form === 'expense' && !form.inert) {
+      form.inert = true;
+      form.setAttribute('aria-busy', 'true');
+      try {
+        await submitExpense(form);
+      } finally {
+        form.inert = false;
+        form.removeAttribute('aria-busy');
+      }
+    }
   } catch (error) {
     showError(form, error.message);
   }
+});
+
+dialog.addEventListener('cancel', event => {
+  if (dialog.querySelector('form[aria-busy]')) event.preventDefault();
+});
+
+dialog.addEventListener('close', () => {
+  if (!receiptPhotoUrl) return;
+  URL.revokeObjectURL(receiptPhotoUrl);
+  receiptPhotoUrl = undefined;
 });
 
 document.addEventListener('change', event => {
@@ -560,6 +628,13 @@ document.addEventListener('change', event => {
     const form = event.target.form;
     const field = form.elements[`share-${event.target.value}`];
     field.disabled = !event.target.checked;
+  }
+  if (event.target.name === 'receipt-photo') {
+    const removal = event.target.form.elements['remove-receipt-photo'];
+    if (removal) {
+      removal.disabled = Boolean(event.target.files.length);
+      if (removal.disabled) removal.checked = false;
+    }
   }
 });
 

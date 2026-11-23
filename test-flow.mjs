@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const types = { '/': 'text/html', '/styles.css': 'text/css', '/app.js': 'text/javascript', '/settlement.js': 'text/javascript' };
+const types = { '/': 'text/html', '/styles.css': 'text/css', '/app.js': 'text/javascript', '/settlement.js': 'text/javascript', '/receipt-photos.js': 'text/javascript' };
 const server = createServer(async (request, response) => {
   const path = request.url;
   if (!Object.hasOwn(types, path)) {
@@ -267,11 +267,67 @@ try {
   await fill('[name=payer]', second);
   await click(`[name=participants][value="${second}"]`);
   await click(`[name=participants][value="${fourth}"]`);
+
+  const attachReceipt = (width, color) => run(`(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = ${width};
+    canvas.height = 40;
+    const context = canvas.getContext('2d');
+    context.fillStyle = ${JSON.stringify(color)};
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const photo = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    const input = document.querySelector('[name=receipt-photo]');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([photo], 'test-receipt.png', { type: 'image/png' }));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await run(`(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['invalid image'], 'broken.jpg', { type: 'image/jpeg' }));
+    document.querySelector('[name=receipt-photo]').files = transfer.files;
+  })()`);
   await saveExpense();
+  await retry(() => run("document.querySelector('#dialog .form-error')?.textContent.includes('사진을 읽을 수 없습니다')"));
+  assert.equal((await records()).rounds[1].expenses.length, 2);
+  await attachReceipt(100, '#205741');
+  await saveExpense();
+  await retry(() => run("document.querySelector('[data-action=photo-view]')"));
   assert.match(await content(`[data-person="${second}"] .participation-list`), /3차 간식 결제만/);
   assert.match(await content(`[data-person="${added.id}"] .participation-list`), /3차 간식 부담 5,000원/);
+  const originalPhotoId = (await records()).rounds[1].expenses[2].receiptPhotoId;
+  const viewReceipt = async width => {
+    await click('[aria-label="3차 간식 영수증 보기"]');
+    await retry(() => run(`document.querySelector('.receipt-preview img')?.naturalWidth === ${width}`));
+    await assertMobileWidth();
+    await click('#dialog [data-action=close]');
+  };
+  await viewReceipt(100);
+  await page.send('Page.reload');
+  await retry(() => run("document.querySelectorAll('[data-action=round]').length === 2"));
+  await click('[data-action=round]:last-child');
+  await viewReceipt(100);
+
+  await click('[aria-label="3차 간식 수정"]');
+  await click('[data-action=expense-open]');
+  await attachReceipt(2400, '#725c24');
+  await saveExpense();
+  await retry(() => run("!document.querySelector('#dialog').open"));
+  const replacementPhotoId = (await records()).rounds[1].expenses[2].receiptPhotoId;
+  assert.notEqual(replacementPhotoId, originalPhotoId);
+  await viewReceipt(2000);
+  const photoExists = photoId => run(`import('./receipt-photos.js').then(async photos => Boolean(await photos.readReceiptPhoto(${JSON.stringify(photoId)})))`);
+  await retry(async () => !(await photoExists(originalPhotoId)));
+
+  await click('[aria-label="3차 간식 수정"]');
+  await click('[data-action=expense-open]');
+  await click('[name=remove-receipt-photo]');
+  await saveExpense();
+  await retry(() => run("!document.querySelector('[data-action=photo-view]')"));
+  assert.equal((await records()).rounds[1].expenses[2].amount, 5000);
+  await retry(async () => !(await photoExists(replacementPhotoId)));
   await assertMobileWidth();
-  console.log('PASS: mobile layout, member editing, roster changes, per-person expense participation, custom shares, clipboard, receipts, reload, demo isolation.');
+  console.log('PASS: mobile layout, member editing, roster changes, per-person expense participation, custom shares, clipboard, payments, receipt photo validation, attachment, persistence, replacement and removal.');
 } finally {
   page?.close();
   browser?.close();
