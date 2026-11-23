@@ -8,6 +8,7 @@ let state = { members: [], rounds: [] };
 let saved = null;
 let loadError = '';
 let view = { type: 'home' };
+let navigationIndex = 0;
 let toastTimer;
 let receiptPhotoUrl;
 
@@ -34,7 +35,7 @@ const currentRound = () => view.id === 'demo' ? state.demo ?? demoRound() : stat
 const attending = round => round.people.filter(person => !person.inactive);
 const getPerson = (round, person) => personInfo(round, state.members, person);
 const personName = (round, person) => escape(getPerson(round, person).name);
-const storageNotice = `<footer class="foot">${icon('lock')} 회원, 정산 기록, 영수증 사진은 현재 브라우저에 저장됩니다.</footer>`;
+const storageNotice = `<p class="storage-notice">${icon('lock')} 회원, 정산 기록, 영수증 사진은 현재 브라우저에 저장됩니다.</p>`;
 
 function read() {
   try {
@@ -75,21 +76,49 @@ function notify(message) {
   toastTimer = setTimeout(() => { toast.textContent = ''; }, 3800);
 }
 
-function go(type, roundId) {
-  view = { type, id: roundId };
+function showView() {
   render();
   window.scrollTo(0, 0);
   main.focus({ preventScroll: true });
 }
 
-function render() {
-  for (const tab of document.querySelectorAll('[data-tab]')) {
-    const active = tab.dataset.tab === (view.type === 'members' ? 'members' : 'rounds');
-    if (active) tab.setAttribute('aria-current', 'page');
-    else tab.removeAttribute('aria-current');
+function go(type, roundId, replace = false) {
+  if (view.type === type && view.id === roundId) return;
+  view = { type, id: roundId };
+  if (!replace) navigationIndex++;
+  history[replace ? 'replaceState' : 'pushState']({ maegolmo: view, index: navigationIndex }, '');
+  showView();
+}
+
+function restoreView(entry) {
+  navigationIndex = entry?.index ?? 0;
+  const next = entry?.maegolmo;
+  if (next && (['home', 'members', 'new-round'].includes(next.type) ||
+    (next.type === 'detail' && next.id === 'demo') ||
+    (['detail', 'edit-roster', 'edit-round'].includes(next.type) && state.rounds.some(round => round.id === next.id)))) {
+    view = next;
+  } else {
+    view = { type: 'home' };
+    history.replaceState({ maegolmo: view, index: navigationIndex }, '');
   }
-  const pages = { home, members, detail, 'new-round': roundForm, 'edit-roster': () => roundForm(currentRound()) };
-  main.innerHTML = (loadError ? `<p class="notice" role="alert">${escape(loadError)}</p>` : '') + pages[view.type]() + storageNotice;
+}
+
+function back() {
+  if (navigationIndex > 0) history.back();
+  else go('home', undefined, true);
+}
+
+function render() {
+  const roundsTab = document.querySelector('[data-tab="rounds"]');
+  const membersOpen = view.type === 'members';
+  if (membersOpen) roundsTab.removeAttribute('aria-current');
+  else roundsTab.setAttribute('aria-current', 'page');
+  const pages = { home, members, detail, 'new-round': roundForm, 'edit-roster': () => roundForm(currentRound()), 'edit-round': editRound };
+  const footer = `<footer class="foot">
+    ${membersOpen ? '' : button('회원 명단', 'members', 'outline', 'users', 'data-tab="members"')}
+    ${storageNotice}
+  </footer>`;
+  main.innerHTML = (loadError ? `<p class="notice" role="alert">${escape(loadError)}</p>` : '') + pages[view.type]() + footer;
 }
 
 function home() {
@@ -138,20 +167,29 @@ function home() {
 function roundRow(round) {
   const { total, pending } = calculate(round);
   const status = pending.length ? `미입금 ${pending.length}건` : round.expenses.length ? '정산 완료' : '지출 등록 전';
-  return `<button type="button" class="card round-row" data-action="round" data-id="${round.id}">
-    <span class="tile">${icon('calendar')}</span>
-    <span class="round-main"><strong>${escape(round.title)}</strong><small class="muted small">${dateLabel(round.date)} · ${attending(round).length}명</small></span>
-    <span class="row-end"><strong>${won(total)}</strong><small><span class="chip ${pending.length ? 'waiting' : ''}">${status}</span></small></span>
-  </button>`;
+  return `<article class="card round-card">
+    <button type="button" class="round-row" data-action="round" data-id="${round.id}">
+      <span class="tile">${icon('calendar')}</span>
+      <span class="round-main"><strong>${escape(round.title)}</strong><small class="muted small">${dateLabel(round.date)} · ${attending(round).length}명</small></span>
+      <span class="row-end"><strong>${won(total)}</strong><small><span class="chip ${pending.length ? 'waiting' : ''}">${status}</span></small></span>
+    </button>
+    <div class="round-actions">
+      ${button('수정', 'edit-round', 'outline', 'edit', `data-id="${round.id}" aria-label="${escape(round.title)} 회차 수정"`)}
+      ${button('삭제', 'round-delete-prompt', 'danger', '', `data-id="${round.id}" aria-label="${escape(round.title)} 회차 삭제"`)}
+    </div>
+  </article>`;
 }
 
 function members() {
   return `<section class="stack">
-    <div class="page-head"><h1>회원 명단</h1><p class="muted">회원의 이름과 송금 계좌를 수정하거나 새 회원을 등록하세요.</p></div>
+    <div class="page-head">${button('이전', 'back', 'outline')}<h1>회원 명단</h1><p class="muted">회원의 이름과 송금 계좌를 수정하거나 새 회원을 등록하세요.</p></div>
     <div class="section-heading"><h2>등록 회원 <span class="chip">${state.members.length}명</span></h2>${button('회원 추가', 'member-add', 'primary', 'plus')}</div>
     ${state.members.length ? `<div class="card">${state.members.map(member => `<div class="person-row spread">
       <div><strong>${escape(member.name)}</strong><p class="small muted">${escape(account(member) || '계좌 미등록')}</p></div>
-      ${memberEditButton(member.id, escape(member.name))}
+      <div class="member-actions">
+        ${memberEditButton(member.id, escape(member.name))}
+        ${button('삭제', 'member-delete-prompt', 'danger', '', `data-id="${member.id}" aria-label="${escape(member.name)} 회원 삭제"`)}
+      </div>
     </div>`).join('')}</div>` : `<div class="card empty"><span class="tile">${icon('users')}</span><strong>등록된 회원이 없어요</strong>
       <p class="muted small">여기서 회원을 추가하거나 새 회차에서 참석자를 등록하세요.</p></div>`}
   </section>`;
@@ -161,19 +199,37 @@ function memberEditButton(memberId, name) {
   return button('정보 수정', 'member-edit', 'outline member-edit', 'edit', `data-id="${memberId}" aria-label="${name} 회원 정보 수정"`);
 }
 
+function rosterBadge(person) {
+  if (person.formerMember) return '<span class="chip">삭제된 회원</span>';
+  return person.memberId ? '' : '<span class="chip">게스트</span>';
+}
+
+function roundFields(round) {
+  return `<label class="field">모임 이름<input name="title" type="text" value="${escape(round?.title)}" placeholder="예: 11월 라운딩 뒤풀이" maxlength="80" required></label>
+    <label class="field">날짜<input name="date" type="date" value="${round?.date ?? today()}" required></label>`;
+}
+
+function editRound() {
+  return `<section class="stack">
+    <div class="page-head">${button('이전', 'back', 'outline')}<h1>회차 수정</h1></div>
+    <form id="round-info-form" class="card form">
+      ${roundFields(currentRound())}
+      <p class="form-error" role="alert" hidden></p>
+      <div class="actions">${button('취소', 'back', 'outline')}<button class="button primary" type="submit">회차 저장</button></div>
+    </form>
+  </section>`;
+}
+
 function roundForm(round) {
   const available = state.members.filter(member => !round?.people.some(person => person.memberId === member.id));
-  const back = round ? button('회차로 돌아가기', 'round', 'outline', 'calendar', `data-id="${round.id}"`) :
-    button('회차 목록', 'home', 'outline', 'calendar');
   return `<section class="stack">
-    <div class="page-head">${back}<h1>${round ? '참석자 변경' : '새 회차'}</h1>${round ? `<p class="muted">${escape(round.title)}</p>` : ''}</div>
+    <div class="page-head">${button('이전', 'back', 'outline')}<h1>${round ? '참석자 변경' : '새 회차'}</h1>${round ? `<p class="muted">${escape(round.title)}</p>` : ''}</div>
     <form id="round-form" class="card form" autocomplete="off">
       ${round ? `<fieldset><legend>회차에 등록된 참석자</legend><div class="check-grid">${round.people.map(person =>
         `<label class="checkline"><input type="checkbox" name="people" value="${person.id}" ${person.inactive ? '' : 'checked'}>
-          <span>${personName(round, person.id)} ${person.memberId ? '' : '<span class="chip">게스트</span>'}</span></label>`).join('')}</div></fieldset>
+          <span>${personName(round, person.id)} ${rosterBadge(person)}</span></label>`).join('')}</div></fieldset>
         ${round.expenses.length || round.receipts.length ? '<p class="notice">등록한 지출의 결제자나 분담 인원도 바꾸려면 회차로 돌아가 각 지출의 수정 버튼을 누르세요. 완료된 입금은 실제 정산에 계속 반영됩니다.</p>' : ''}` :
-        `<label class="field">모임 이름<input name="title" type="text" placeholder="예: 11월 라운딩 뒤풀이" maxlength="80" required></label>
-        <label class="field">날짜<input name="date" type="date" value="${today()}" required></label>`}
+        roundFields()}
       <fieldset><legend>저장된 회원</legend>
         ${available.length ? `<div class="check-grid">${available.map(member =>
           `<label class="checkline"><input type="checkbox" name="members" value="${member.id}">${escape(member.name)}</label>`).join('')}</div>` :
@@ -185,7 +241,7 @@ function roundForm(round) {
         <div id="new-people"></div>
       </fieldset>
       <p class="form-error" role="alert" hidden></p>
-      <div class="actions">${round ? button('취소', 'round', 'outline', '', `data-id="${round.id}"`) : button('취소', 'home', 'outline')}
+      <div class="actions">${button('취소', 'back', 'outline')}
         <button class="button primary" type="submit">${round ? '참석자 저장' : '회차 저장'}</button></div>
     </form>
   </section>`;
@@ -195,7 +251,7 @@ function detail() {
   const round = currentRound();
   const { people, expenseShares, total, pending, remaining } = calculate(round);
   return `<section class="stack">
-    <div class="page-head">${button('회차 목록', 'home', 'outline', 'calendar')}
+    <div class="page-head">${button('이전', 'back', 'outline')}
       <div class="spread"><h1>${escape(round.title)}</h1>${round.demo ? '<span class="chip demo">시연용</span>' : ''}</div>
       <div class="spread"><p class="muted">${dateLabel(round.date)} · 참석자 ${attending(round).length}명</p>
         ${round.demo ? '' : button('참석자 변경', 'edit-roster', 'outline', 'users', `data-id="${round.id}"`)}</div>
@@ -218,7 +274,7 @@ function detail() {
             const name = personName(round, person.id);
             const edit = person.memberId ? memberEditButton(person.memberId, name) : '';
             return `<div class="person-row attendee-amount" data-person="${person.id}"><div class="spread"><div>
-                <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : !person.memberId && !round.demo ? '<span class="chip">게스트</span>' : ''}</strong>
+                <strong>${name} ${person.inactive ? '<span class="chip">이전 참석자</span>' : round.demo ? '' : rosterBadge(person)}</strong>
                 <p class="small muted">결제 ${won(people[person.id].paid)} · 부담 ${won(people[person.id].share)}</p>
               </div>${edit}</div>
               ${participationList(round.expenses, expenseShares, person.id)}
@@ -322,7 +378,12 @@ function submitRound(form) {
     const previous = existing ?? original?.people.find(person =>
       (member && person.memberId === member.id) || nameKey(getPerson(original, person.id).name) === key);
     const memberId = member?.id ?? previous?.memberId;
-    people.push({ id: previous?.id ?? id(), name, ...(memberId ? { memberId } : {}) });
+    const personId = previous?.id ?? id();
+    if (memberId) people.push({ id: personId, name, memberId });
+    else {
+      const { inactive, ...savedPerson } = previous ?? {};
+      people.push({ ...savedPerson, id: personId, name });
+    }
   }
   for (const personId of data.getAll('people')) {
     const person = original.people.find(entry => entry.id === personId);
@@ -350,8 +411,18 @@ function submitRound(form) {
     { id: id(), title, date: data.get('date'), people, expenses: [], receipts: [] };
   const rounds = original ? state.rounds.map(entry => entry.id === round.id ? round : entry) : [round, ...state.rounds];
   persist({ ...state, members: nextMembers, rounds });
-  go('detail', round.id);
+  if (original) back();
+  else go('detail', round.id, true);
   notify(original ? '참석자 변경을 저장했어요.' : '새 회차를 저장했어요.');
+}
+
+function submitRoundInfo(form) {
+  const data = new FormData(form);
+  const title = data.get('title').trim();
+  if (!title) throw new Error('모임 이름을 입력해 주세요.');
+  saveRound({ ...currentRound(), title, date: data.get('date') });
+  back();
+  notify('회차 정보를 수정했어요.');
 }
 
 function mergeRoster(round, selected) {
@@ -406,6 +477,24 @@ function submitMember(form) {
   dialog.close();
   render();
   notify('회원 정보를 저장했어요.');
+}
+
+function deleteMember(memberId) {
+  const member = state.members.find(entry => entry.id === memberId);
+  const { name, bank, account, holder } = member;
+  const rounds = state.rounds.map(round => {
+    if (!round.people.some(person => person.memberId === memberId)) return round;
+    const people = round.people.map(person => {
+      if (person.memberId !== memberId) return person;
+      const { memberId: linkedMemberId, ...entry } = person;
+      return { ...entry, name, bank, account, holder, formerMember: true };
+    });
+    return { ...round, people };
+  });
+  persist({ ...state, members: state.members.filter(entry => entry.id !== memberId), rounds });
+  dialog.close();
+  render();
+  notify('회원 명단에서 삭제했어요.');
 }
 
 function expenseEditor(expenseId) {
@@ -467,6 +556,10 @@ async function submitExpense(form) {
   const receiptPhotoId = newPhotoId ?? (data.has('remove-receipt-photo') ? undefined : previousPhotoId);
   if (receiptPhotoId) expense.receiptPhotoId = receiptPhotoId;
   if (newPhotoId) await saveReceiptPhoto(newPhotoId, upload);
+  if (!dialog.open || !form.isConnected) {
+    discardPhoto(newPhotoId);
+    return;
+  }
   try {
     saveRound({ ...round, expenses });
   } catch (error) {
@@ -535,9 +628,24 @@ async function copyAnnouncement() {
 
 const actions = {
   home: () => go('home'),
+  back,
   members: () => go('members'),
   'new-round': () => go('new-round'),
   'edit-roster': item => go('edit-roster', item),
+  'edit-round': item => go('edit-round', item),
+  'round-delete-prompt': item => {
+    const round = state.rounds.find(entry => entry.id === item);
+    confirmAction('회차를 삭제할까요?', `‘${escape(round.title)}’의 지출, 입금 기록, 영수증 사진이 삭제됩니다. 삭제한 회차는 복구할 수 없습니다.`,
+      '회차 삭제', 'round-delete', item, 'danger');
+  },
+  'round-delete': item => {
+    const round = state.rounds.find(entry => entry.id === item);
+    persist({ ...state, rounds: state.rounds.filter(entry => entry.id !== item) });
+    round.expenses.forEach(expense => discardPhoto(expense.receiptPhotoId));
+    dialog.close();
+    render();
+    notify('회차를 삭제했어요.');
+  },
   demo: () => go('detail', 'demo'),
   round: item => go('detail', item),
   'names-add': () => {
@@ -548,6 +656,12 @@ const actions = {
   'name-remove': (_, control) => control.closest('.new-person').remove(),
   'member-add': () => memberEditor(),
   'member-edit': item => memberEditor(state.members.find(member => member.id === item)),
+  'member-delete-prompt': item => {
+    const member = state.members.find(entry => entry.id === item);
+    confirmAction('회원을 삭제할까요?', `‘${escape(member.name)}’을 회원 명단에서 삭제합니다. 참석했던 회차에는 삭제 시점의 이름과 계좌 정보가 남습니다.`,
+      '회원 삭제', 'member-delete', item, 'danger');
+  },
+  'member-delete': deleteMember,
   'expense-add': () => beginExpense(),
   'expense-edit': item => beginExpense(item),
   'expense-open': item => expenseEditor(item),
@@ -597,6 +711,7 @@ document.addEventListener('submit', async event => {
   const form = event.target;
   try {
     if (form.id === 'round-form') submitRound(form);
+    else if (form.id === 'round-info-form') submitRoundInfo(form);
     else if (form.dataset.form === 'member') submitMember(form);
     else if (form.dataset.form === 'expense' && !form.inert) {
       form.inert = true;
@@ -639,4 +754,11 @@ document.addEventListener('change', event => {
 });
 
 read();
+restoreView(history.state);
 render();
+
+window.addEventListener('popstate', event => {
+  if (dialog.open) dialog.close();
+  restoreView(event.state);
+  showView();
+});

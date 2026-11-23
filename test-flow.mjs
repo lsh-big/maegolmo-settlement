@@ -8,8 +8,9 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const types = { '/': 'text/html', '/styles.css': 'text/css', '/app.js': 'text/javascript', '/settlement.js': 'text/javascript', '/receipt-photos.js': 'text/javascript' };
+const testUrl = process.env.MAEGOLMO_TEST_URL;
 const server = createServer(async (request, response) => {
-  const path = request.url;
+  const path = new URL(request.url, 'http://127.0.0.1').pathname;
   if (!Object.hasOwn(types, path)) {
     response.writeHead(404).end();
     return;
@@ -17,14 +18,18 @@ const server = createServer(async (request, response) => {
   const content = await readFile(new URL(`./dist${path === '/' ? '/index.html' : path}`, import.meta.url));
   response.writeHead(200, { 'Content-Type': `${types[path]}; charset=utf-8` }).end(content);
 });
-server.listen(0, '127.0.0.1');
-await once(server, 'listening');
-const url = `http://127.0.0.1:${server.address().port}`;
+if (!testUrl) {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+}
+const url = testUrl ?? `http://127.0.0.1:${server.address().port}`;
 const profile = await mkdtemp(join(tmpdir(), 'maegolmo-test-'));
 const edge = spawn(process.argv[2] ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', [
   '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
   '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
 ], { windowsHide: true, stdio: 'ignore' });
+const mobile = process.env.MAEGOLMO_TEST_DESKTOP !== '1';
+const viewport = mobile ? { width: 390, height: 844, deviceScaleFactor: 2 } : { width: 1280, height: 900, deviceScaleFactor: 1 };
 let launchError;
 edge.once('error', error => { launchError = error; });
 
@@ -72,8 +77,8 @@ try {
   page = await connect(pages.find(item => item.type === 'page').webSocketDebuggerUrl);
   await page.send('Page.bringToFront');
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  await browser.send('Browser.grantPermissions', { origin: url, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await page.send('Emulation.setDeviceMetricsOverride', { ...viewport, mobile });
+  await browser.send('Browser.grantPermissions', { origin: new URL(url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await page.send('Page.navigate', { url });
 
   async function run(expression) {
@@ -88,20 +93,24 @@ try {
   const saveExpense = () => click('#dialog [type=submit]');
 
   await retry(() => run("document.querySelector('h1')?.textContent"));
-  async function assertMobileWidth() {
-    const overflow = await run(`[...document.querySelectorAll('body *')].filter(el => {
-      const bounds = el.getBoundingClientRect();
-      return bounds.right > 390 && (el instanceof HTMLElement);
-    }).map(el => [el.tagName, el.className, el.getBoundingClientRect().right])`);
-    assert.equal(await run('document.documentElement.scrollWidth'), 390, JSON.stringify(overflow));
+  async function assertViewportWidth() {
+    const { clientWidth, scrollWidth } = await run("({ clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth })");
+    assert.equal(scrollWidth, clientWidth);
+    if (mobile) assert.equal(clientWidth, viewport.width);
   }
-  await assertMobileWidth();
+  await assertViewportWidth();
   assert.match(await content(), /아직 등록된 회차/);
+  assert.equal(await run("document.querySelector('.topbar [data-action=members]') === null"), true);
+  assert.match(await content('.foot [data-action=members]'), /회원 명단/);
   await click('[data-action=demo]');
   assert.match(await content(), /시연용/);
   assert.match(await content(), /185,000원/);
   await click('[data-tab=members]');
   assert.match(await content(), /등록된 회원이 없어요/);
+  await click('[data-action=back]');
+  await retry(() => run("document.querySelector('h1')?.textContent === '가을 라운딩 뒤풀이'"));
+  await run('history.back()');
+  await retry(() => run("document.querySelector('h1')?.textContent === '매골모 회식비 정산'"));
   await click('[data-tab=rounds]');
   await click('[data-action=new-round]');
   await fill('[name=title]', '검증 회식');
@@ -145,7 +154,7 @@ try {
   assert.match(await content(`[data-person="${first}"] .participation-list`), /1차 식사 부담 25,001원 · 결제자[\s\S]*2차 술자리 부담 0원/);
   assert.match(await content(`[data-person="${second}"] .participation-list`), /2차 술자리 부담 35,001원 · 결제자/);
   assert.doesNotMatch(await content(`[data-person="${fourth}"] .participation-list`), /2차 술자리/);
-  await assertMobileWidth();
+  await assertViewportWidth();
 
   await click('[data-tab=members]');
   await click('[data-action=member-edit]');
@@ -180,8 +189,7 @@ try {
   assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키 10,001원/);
 
   await page.send('Page.reload');
-  await retry(() => run("document.querySelector('[data-action=round]')?.textContent"));
-  await click('[data-action=round]');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   assert.match(await content('.detail-banner'), /150,000원/);
   assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키 10,001원/);
   await click('[data-tab=rounds]');
@@ -209,17 +217,17 @@ try {
   assert.match(await content(), /미키버디/);
   assert.equal((await records()).members.length, 4);
   await page.send('Page.reload');
-  await retry(() => run("document.querySelectorAll('[data-action=round]').length === 2"));
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   await click('[data-tab=members]');
   assert.match(await content(), /미키버디\s+가상은행2 TEST-ONLY/);
   await click('[data-tab=rounds]');
-  await click('[data-action=round]:last-child');
+  await click('.round-card:last-child [data-action=round]');
   assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
   await click('[data-tab=rounds]');
   await click('[data-action=new-round]');
   assert.match(await content('#round-form'), /미키버디/);
   await click('[data-tab=rounds]');
-  await click('[data-action=round]:last-child');
+  await click('.round-card:last-child [data-action=round]');
   await click('[data-action=edit-roster]');
   assert.match(await content(), /완료된 입금은 실제 정산에 계속 반영/);
   await click(`[name=people][value="${first}"]`);
@@ -228,6 +236,7 @@ try {
   await click('[data-action=names-add]');
   await click('.guest');
   await click('#round-form [type=submit]');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   assert.match(await content(), /참석자 3명/);
   assert.match(await content(), /미키버디 이전 참석자/);
   assert.match(await content(), /지은 이전 참석자/);
@@ -240,7 +249,7 @@ try {
   assert.deepEqual(updated.expenses[0].participants, [first, second, third, fourth]);
   assert.equal(updated.receipts.length, 1);
   assert.equal(stored.members.length, 4);
-  await assertMobileWidth();
+  await assertViewportWidth();
 
   await click('[data-action=expense-add]');
   await click('[data-action=expense-open]');
@@ -253,8 +262,7 @@ try {
   await saveExpense();
   assert.deepEqual((await records()).rounds[1].expenses[1].participants, [first, second, added.id]);
   await page.send('Page.reload');
-  await retry(() => run("document.querySelectorAll('[data-action=round]').length === 2"));
-  await click('[data-action=round]:last-child');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   assert.match(await content(), /참석자 3명/);
   assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
   assert.match(await content(`[data-person="${added.id}"] .participation-list`), /2차 술자리 부담 25,000원/);
@@ -299,13 +307,12 @@ try {
   const viewReceipt = async width => {
     await click('[aria-label="3차 간식 영수증 보기"]');
     await retry(() => run(`document.querySelector('.receipt-preview img')?.naturalWidth === ${width}`));
-    await assertMobileWidth();
+    await assertViewportWidth();
     await click('#dialog [data-action=close]');
   };
   await viewReceipt(100);
   await page.send('Page.reload');
-  await retry(() => run("document.querySelectorAll('[data-action=round]').length === 2"));
-  await click('[data-action=round]:last-child');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   await viewReceipt(100);
 
   await click('[aria-label="3차 간식 수정"]');
@@ -326,8 +333,59 @@ try {
   await retry(() => run("!document.querySelector('[data-action=photo-view]')"));
   assert.equal((await records()).rounds[1].expenses[2].amount, 5000);
   await retry(async () => !(await photoExists(replacementPhotoId)));
-  await assertMobileWidth();
-  console.log('PASS: mobile layout, member editing, roster changes, per-person expense participation, custom shares, clipboard, payments, receipt photo validation, attachment, persistence, replacement and removal.');
+
+  await click('[aria-label="3차 간식 수정"]');
+  await click('[data-action=expense-open]');
+  await attachReceipt(100, '#205741');
+  await saveExpense();
+  await retry(() => run("document.querySelector('[data-action=photo-view]')"));
+  const finalPhotoId = (await records()).rounds[1].expenses[2].receiptPhotoId;
+
+  await click('.foot [data-action=members]');
+  await click('[aria-label="미키버디 회원 삭제"]');
+  assert.match(await content('#dialog'), /삭제 시점의 이름과 계좌 정보가 남습니다/);
+  await click('#dialog [data-action=close]');
+  assert.equal((await records()).members.length, 4);
+  await click('[aria-label="미키버디 회원 삭제"]');
+  await click('#dialog [data-action=member-delete]');
+  assert.doesNotMatch(await content(), /미키버디/);
+  assert.equal((await records()).members.length, 3);
+  await assertViewportWidth();
+  await click('[data-action=back]');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
+  assert.match(await content(), /민수 → 미키버디 10,001원/);
+  assert.match(await content('.transfers'), /가상은행2 TEST-ONLY/);
+  assert.equal(await run(`document.querySelector('[data-person="${first}"] [data-action=member-edit]') === null`), true);
+  await page.send('Page.reload');
+  await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
+  assert.match(await content('.transfers'), /가상은행2 TEST-ONLY/);
+  await click('[data-tab=rounds]');
+  await click('[data-action=new-round]');
+  assert.equal(await run("document.querySelectorAll('[name=members]').length"), 3);
+  assert.doesNotMatch(await content('#round-form'), /미키버디/);
+
+  await click('[data-action=back]');
+  await retry(() => run("document.querySelectorAll('.round-card').length === 2"));
+  await click('[aria-label="검증 회식 회차 수정"]');
+  await fill('#round-info-form [name=title]', '수정된 회식');
+  await fill('#round-info-form [name=date]', '2026-11-01');
+  await click('#round-info-form [type=submit]');
+  await retry(() => run("document.querySelector('[aria-label=\"수정된 회식 회차 수정\"]')"));
+  assert.match(await content(), /수정된 회식\s+2026\. 11\. 01/);
+  await click('[aria-label="수정된 회식 회차 삭제"]');
+  assert.match(await content('#dialog'), /입금 기록, 영수증 사진이 삭제됩니다/);
+  await click('#dialog [data-action=close]');
+  assert.equal((await records()).rounds.length, 2);
+  await click('[aria-label="수정된 회식 회차 삭제"]');
+  await click('#dialog [data-action=round-delete]');
+  stored = await records();
+  assert.deepEqual(stored.rounds.map(round => round.title), ['다음 회차']);
+  assert.equal(stored.members.length, 3);
+  await retry(async () => !(await photoExists(finalPhotoId)));
+  await run('history.back()');
+  await retry(() => run("document.querySelectorAll('.round-card').length === 1"));
+  await assertViewportWidth();
+  console.log(`PASS (${mobile ? 'mobile' : 'desktop'}): layout and back navigation, round and member deletion with historical records preserved as applicable, roster editing, clipboard, payments, and receipt photos.`);
 } finally {
   page?.close();
   browser?.close();
@@ -336,6 +394,6 @@ try {
     edge.kill();
     await exited;
   }
-  server.close();
+  if (!testUrl) server.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
 }
