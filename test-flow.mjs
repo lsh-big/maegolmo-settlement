@@ -6,6 +6,33 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { announcement, calculate } from './dist/settlement.js';
+
+const payers = ['motan', 'miki'];
+const attendees = ['rara', 'bonggu', 'igeon', 'title'];
+const participants = [...payers, ...attendees];
+const splitRound = {
+  people: participants.map(id => ({ id, memberId: `member-${id}`, name: id })),
+  expenses: payers.map((payer, index) => ({ id: payer, title: `${index + 1}차`, amount: 60_000, payer, participants, overrides: {} })),
+  receipts: [],
+};
+const expectedTransfers = attendees.flatMap(from => payers.map(to => ({ from, to, amount: 10_000 })));
+const split = calculate(splitRound);
+assert.equal(split.total, 120_000);
+assert.equal(split.remaining, 80_000);
+assert.deepEqual(split.pending, expectedTransfers);
+const renamedMembers = [{ id: 'member-motan', name: '모탄버디' }, { id: 'member-rara', name: '라라버디' }];
+assert.match(announcement(splitRound, renamedMembers), /라라버디 → 모탄버디 10,000원/);
+
+const partial = calculate({ ...splitRound, receipts: [expectedTransfers[0]] });
+assert.equal(partial.remaining, 70_000);
+assert.deepEqual(partial.pending, expectedTransfers.slice(1));
+assert.deepEqual(calculate({ ...splitRound, receipts: expectedTransfers }).pending, []);
+
+const legacy = calculate({ ...splitRound, receipts: [{ from: attendees[0], to: payers[0], amount: 20_000 }] });
+assert.equal(legacy.remaining, 60_000);
+assert.ok(legacy.pending.every(({ from }) => from !== attendees[0]));
+assert.equal(legacy.pending.filter(({ to }) => to === payers[0]).reduce((sum, entry) => sum + entry.amount, 0), 20_000);
 
 const types = { '/': 'text/html', '/styles.css': 'text/css', '/app.js': 'text/javascript', '/settlement.js': 'text/javascript', '/receipt-photos.js': 'text/javascript' };
 const testUrl = process.env.MAEGOLMO_TEST_URL;
@@ -91,6 +118,7 @@ try {
   const content = (selector = '#main') => run(`document.querySelector(${JSON.stringify(selector)}).innerText`);
   const records = () => run("JSON.parse(localStorage.getItem('maegolmo-settlement-v1'))");
   const saveExpense = () => click('#dialog [type=submit]');
+  const confirmedMinsu = '.transfer:has([data-action=receipt-undo][aria-label^="민수 → 미키"])';
 
   await retry(() => run("document.querySelector('h1')?.textContent"));
   async function assertViewportWidth() {
@@ -150,7 +178,7 @@ try {
   await saveExpense();
   assert.match(await content('.detail-banner'), /150,004원/);
   assert.match(await content('.detail-banner'), /75,002원/);
-  assert.match(await content('.transfers'), /민수 → 미키 10,001원/);
+  assert.match(await content('.transfer:has([data-action=receipt-add][aria-label^="민수 → 미키"])'), /미키 10,001원/);
   assert.match(await content(`[data-person="${first}"] .participation-list`), /1차 식사 부담 25,001원 · 결제자[\s\S]*2차 술자리 부담 0원/);
   assert.match(await content(`[data-person="${second}"] .participation-list`), /2차 술자리 부담 35,001원 · 결제자/);
   assert.doesNotMatch(await content(`[data-person="${fourth}"] .participation-list`), /2차 술자리/);
@@ -184,14 +212,23 @@ try {
   await click('[data-action=expense-open]');
   await fill('[name=amount]', '99999');
   await saveExpense();
-  assert.match(await content('.transfers'), /현우 → 민수 1원/);
-  assert.doesNotMatch(await content('.transfers'), /민수 → 미키/);
-  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키 10,001원/);
+  const jieunGroup = '.transfer-group:has([data-action=receipt-add][aria-label^="지은 → 미키"])';
+  const jieunToMinsu = '[data-action=receipt-add][aria-label="지은 → 민수 1원 입금 완료 체크"]';
+  assert.equal(await content(`${jieunGroup} h3`), '지은');
+  assert.equal(await run(`document.querySelector(${JSON.stringify(jieunGroup)}).querySelectorAll('[data-action=receipt-add]').length`), 2);
+  assert.equal(await run(`document.querySelector(${JSON.stringify(jieunGroup)}).querySelector(${JSON.stringify(jieunToMinsu)}) !== null`), true);
+  await click(jieunToMinsu);
+  assert.match(await content(jieunGroup), /민수 1원[\s\S]*입금 완료/);
+  assert.equal(await run(`document.querySelector(${JSON.stringify(jieunGroup)}).querySelectorAll('[data-action=receipt-add]').length`), 1);
+  await click(`${jieunGroup} [data-action=receipt-undo]`);
+  await click('#dialog [data-action=receipt-remove]');
+  assert.equal(await run(`document.querySelector(${JSON.stringify(jieunToMinsu)}) !== null`), true);
+  assert.match(await content(confirmedMinsu), /미키 10,001원[\s\S]*입금 완료/);
 
   await page.send('Page.reload');
   await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   assert.match(await content('.detail-banner'), /150,000원/);
-  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키 10,001원/);
+  assert.match(await content(confirmedMinsu), /미키 10,001원[\s\S]*입금 완료/);
   await click('[data-tab=rounds]');
   await click('[data-action=new-round]');
   assert.equal(await run("document.querySelectorAll('[name=members]').length"), 4);
@@ -222,7 +259,7 @@ try {
   assert.match(await content(), /미키버디\s+가상은행2 TEST-ONLY/);
   await click('[data-tab=rounds]');
   await click('.round-card:last-child [data-action=round]');
-  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
+  assert.match(await content(confirmedMinsu), /미키버디 10,001원[\s\S]*입금 완료/);
   await click('[data-tab=rounds]');
   await click('[data-action=new-round]');
   assert.match(await content('#round-form'), /미키버디/);
@@ -241,7 +278,7 @@ try {
   assert.match(await content(), /미키버디 이전 참석자/);
   assert.match(await content(), /지은 이전 참석자/);
   assert.match(await content(), /새참석 게스트/);
-  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
+  assert.match(await content(confirmedMinsu), /미키버디 10,001원[\s\S]*입금 완료/);
   stored = await records();
   const updated = stored.rounds[1];
   const added = updated.people.find(person => person.name === '새참석');
@@ -264,7 +301,7 @@ try {
   await page.send('Page.reload');
   await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
   assert.match(await content(), /참석자 3명/);
-  assert.match(await content(), /입금 완료 기록[\s\S]*민수 → 미키버디 10,001원/);
+  assert.match(await content(confirmedMinsu), /미키버디 10,001원[\s\S]*입금 완료/);
   assert.match(await content(`[data-person="${added.id}"] .participation-list`), /2차 술자리 부담 25,000원/);
   assert.doesNotMatch(await content(`[data-person="${third}"] .participation-list`), /2차 술자리/);
 
@@ -353,7 +390,7 @@ try {
   await assertViewportWidth();
   await click('[data-action=back]');
   await retry(() => run("document.querySelector('.detail-banner')?.textContent"));
-  assert.match(await content(), /민수 → 미키버디 10,001원/);
+  assert.match(await content(confirmedMinsu), /미키버디 10,001원[\s\S]*입금 완료/);
   assert.match(await content('.transfers'), /가상은행2 TEST-ONLY/);
   assert.equal(await run(`document.querySelector('[data-person="${first}"] [data-action=member-edit]') === null`), true);
   await page.send('Page.reload');

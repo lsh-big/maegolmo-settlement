@@ -1,4 +1,4 @@
-import { STORAGE_KEY, won, id, nameKey, splitNames, today, allocate, calculate, personInfo, account, announcement, demoRound } from './settlement.js';
+import { STORAGE_KEY, won, id, nameKey, splitNames, today, allocate, calculate, personInfo, account, announcement, demoRound } from './settlement.js?v=20261126';
 import { saveReceiptPhoto, readReceiptPhoto, deleteReceiptPhoto } from './receipt-photos.js';
 
 const main = document.querySelector('#main');
@@ -285,10 +285,9 @@ function detail() {
       <section class="card" aria-labelledby="transfers-title">
         <h2 id="transfers-title">송금 및 입금 확인</h2>
         <div class="transfers">
-          ${pending.length ? pending.map((entry, index) => transferRow(round, entry, index)).join('') :
-          `<p class="muted small">${round.expenses.length ? '남은 송금이 없습니다.' : '지출을 등록하면 송금액이 계산됩니다.'}</p>`}
+          ${pending.length ? '' : `<p class="muted small">${round.expenses.length || round.receipts.length ? '남은 송금이 없습니다.' : '지출을 등록하면 송금액이 계산됩니다.'}</p>`}
+          ${transferGroups(round, pending)}
         </div>
-        ${round.receipts.length ? `<h3 class="small" style="margin-top:14px">입금 완료 기록</h3>${round.receipts.map(entry => transferRow(round, entry)).join('')}` : ''}
         <div style="margin-top:14px">${button('카톡 공지 복사', 'copy', 'primary', 'chat', round.expenses.length || round.receipts.length ? '' : 'disabled')}</div>
       </section>
     </div>
@@ -318,14 +317,27 @@ function expenseRow(round, expense, shares) {
     `data-id="${expense.id}" aria-label="${escape(expense.title)} 영수증 보기"`) : ''}</div>`;
 }
 
+function transferGroups(round, pending) {
+  const groups = new Map(round.people.map(({ id }) => [id, []]));
+  pending.forEach((entry, index) => groups.get(entry.from).push(transferRow(round, entry, index)));
+  round.receipts.forEach(entry => groups.get(entry.from).push(transferRow(round, entry)));
+  return Array.from(groups, ([from, rows]) => rows.length ? `<section class="transfer-group">
+    <h3>${personName(round, from)}</h3>
+    <ul class="transfer-list">${rows.join('')}</ul>
+  </section>` : '').join('');
+}
+
 function transferRow(round, entry, index) {
   const bank = account(getPerson(round, entry.to));
+  const receiver = personName(round, entry.to);
+  const description = `${personName(round, entry.from)} → ${receiver} ${won(entry.amount)}`;
   const complete = index === undefined;
-  return `<div class="transfer"><div><div>${personName(round, entry.from)} → ${personName(round, entry.to)} <strong>${won(entry.amount)}</strong></div>
+  return `<li class="transfer"><div><div><span aria-hidden="true">→ </span>${receiver} <strong>${won(entry.amount)}</strong>
+    ${complete ? '<span class="transfer-status">입금 완료</span>' : ''}</div>
     ${bank && !complete ? `<p class="muted small">${escape(bank)}</p>` : ''}</div>
-    ${complete ? `<div class="spread"><span class="chip">입금 완료</span>${button('체크 되돌리기', 'receipt-undo', 'ghost', '', `data-id="${entry.id}"`)}</div>` :
-    button('입금 완료 체크', 'receipt-add', 'outline', 'check', `data-id="${index}"`)}
-  </div>`;
+    ${complete ? button('되돌리기', 'receipt-undo', 'ghost', '', `data-id="${entry.id}" aria-label="${description} 체크 되돌리기"`) :
+    button('체크', 'receipt-add', 'outline', 'check', `data-id="${index}" aria-label="${description} 입금 완료 체크"`)}
+  </li>`;
 }
 
 function showError(form, message) {

@@ -43,6 +43,15 @@ export function allocate(total, participantIds, overrides) {
 
 export function calculate(round) {
   const people = Object.fromEntries(round.people.map(({ id: person }) => [person, { paid: 0, share: 0, received: 0, sent: 0 }]));
+  const obligations = new Map(round.people.map(({ id: person }) => [person, new Map()]));
+  function addObligation(from, to, amount) {
+    if (from === to || !amount) return;
+    const outgoing = obligations.get(from);
+    const incoming = obligations.get(to);
+    outgoing.set(to, (outgoing.get(to) ?? 0) + amount);
+    incoming.set(from, (incoming.get(from) ?? 0) - amount);
+  }
+
   const expenseShares = new Map();
   let total = 0;
   for (const expense of round.expenses) {
@@ -50,11 +59,15 @@ export function calculate(round) {
     people[expense.payer].paid += expense.amount;
     const shares = allocate(expense.amount, expense.participants, expense.overrides);
     expenseShares.set(expense.id, shares);
-    for (const [person, amount] of Object.entries(shares)) people[person].share += amount;
+    for (const [person, amount] of Object.entries(shares)) {
+      people[person].share += amount;
+      addObligation(person, expense.payer, amount);
+    }
   }
   for (const { from, to, amount } of round.receipts) {
     people[from].sent += amount;
     people[to].received += amount;
+    addObligation(from, to, -amount);
   }
   const debtors = [];
   const creditors = [];
@@ -62,21 +75,38 @@ export function calculate(round) {
     const { paid, share, received, sent } = people[person];
     const balance = paid - share - received + sent;
     if (balance > 0) creditors.push({ person, balance });
-    if (balance < 0) debtors.push({ person, balance: -balance });
+    if (balance < 0) debtors.push({ person, balance: -balance, transfers: new Map() });
   }
-  const pending = [];
+  function addTransfer(debtor, creditor, amount) {
+    const to = creditor.person;
+    debtor.transfers.set(to, (debtor.transfers.get(to) ?? 0) + amount);
+    debtor.balance -= amount;
+    creditor.balance -= amount;
+  }
+
+  // Keep each person's share with its original payer where their net balances allow it.
+  for (const debtor of debtors) {
+    for (const creditor of creditors) {
+      if (!debtor.balance) break;
+      const owed = obligations.get(debtor.person).get(creditor.person) ?? 0;
+      const amount = Math.min(owed, debtor.balance, creditor.balance);
+      if (amount > 0) addTransfer(debtor, creditor, amount);
+    }
+  }
+
+  // Clear remaining balances from indirect debts and previously recorded payments.
   let sender = 0;
   let recipient = 0;
   while (sender < debtors.length && recipient < creditors.length) {
     const debtor = debtors[sender];
     const creditor = creditors[recipient];
     const amount = Math.min(debtor.balance, creditor.balance);
-    pending.push({ from: debtor.person, to: creditor.person, amount });
-    debtor.balance -= amount;
-    creditor.balance -= amount;
+    if (amount) addTransfer(debtor, creditor, amount);
     if (!debtor.balance) sender++;
     if (!creditor.balance) recipient++;
   }
+  const pending = debtors.flatMap(({ person: from, transfers }) =>
+    Array.from(transfers, ([to, amount]) => ({ from, to, amount })));
   return { people, expenseShares, total, pending, remaining: pending.reduce((sum, item) => sum + item.amount, 0) };
 }
 

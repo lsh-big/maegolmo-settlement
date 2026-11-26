@@ -91,23 +91,29 @@ nav button[aria-current] { background: white; color: var(--forest); box-shadow: 
 .detail-banner span { display: block; color: #d5e4db; font-size: .9rem; }
 .detail-banner strong { display: block; color: var(--lime); font-size: clamp(1.15rem, 3.3vw, 1.75rem); }
 .notice { background: #fbf3e2; border: 1px solid #edddba; border-radius: 11px; color: #644818; padding: 11px 13px; font-size: .9rem; }
-.expense-row, .person-row, .transfer { padding-block: 12px; border-top: 1px solid var(--line); }
+.expense-row, .person-row { padding-block: 12px; border-top: 1px solid var(--line); }
 .expense-row:first-of-type, .person-row:first-of-type { border-top: 0; }
 .member-actions { display: flex; gap: 6px; justify-content: flex-end; flex-shrink: 0; }
 .expense-row details { margin-top: 6px; }
 summary { cursor: pointer; color: var(--green); padding: 6px 0; }
 .people-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.attendee-amount, .transfer { padding-block: 8px; font-size: .875rem; }
+.attendee-amount { padding-block: 8px; font-size: .875rem; }
 .attendee-amount .small, .transfer .small, .participation-list li { font-size: .8125rem; }
-.attendee-amount .button, .transfer .button { font-size: inherit; }
+.attendee-amount .button { font-size: inherit; }
 .participation-list { margin: 6px 0 0; padding: 0; list-style: none; }
 ul.participation-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .participation-list li { padding: 3px 7px; border-radius: 8px; background: #edf3e9; color: var(--forest); }
 .participation-list small { font-size: inherit; color: var(--muted); }
-.transfer { display: grid; gap: 4px; }
-.transfer .button { justify-self: start; }
-.transfer strong { color: var(--green); }
-.transfers { margin-top: 10px; }
+.transfers { display: grid; gap: 6px; margin-top: 8px; }
+.transfer-group { border: 1px solid var(--line); border-radius: 9px; }
+.transfer-group h3 { padding: 3px 8px; border-radius: 8px 8px 0 0; background: #edf3e9; color: var(--forest); font-size: .875rem; }
+.transfer-list { margin: 0; padding: 0 8px; list-style: none; }
+.transfer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding-block: 3px; font-size: .875rem; }
+.transfer + .transfer { border-top: 1px solid var(--line); }
+.transfer .button { min-height: 30px; padding: 3px 6px; gap: 3px; border-radius: 7px; font-size: .8125rem; white-space: nowrap; }
+.transfer .button svg { width: 15px; height: 15px; }
+.transfer strong { color: var(--green); white-space: nowrap; }
+.transfer-status { display: inline-block; margin-inline-start: 4px; color: var(--muted); font-size: .75rem; }
 .form { display: grid; gap: 16px; }
 .form label, legend { font-weight: 700; }
 input[type="text"], input[type="date"], textarea, select { width: 100%; min-height: 46px; border: 1px solid #cbd8ce; border-radius: 9px; background: white; padding: 9px 11px; font-size: 1rem; }
@@ -137,6 +143,9 @@ dialog::backdrop { background: #10271eb3; }
 .statement { width: 100%; min-height: 215px; }
 .toast { position: fixed; z-index: 5; inset: auto 12px 16px; margin: auto; width: fit-content; max-width: calc(100% - 24px); border-radius: 11px; padding: 11px 17px; background: var(--forest); color: white; box-shadow: 0 4px 20px #142c2142; }
 .toast:empty { display: none; }
+@media (any-pointer: coarse) {
+  .transfer .button { min-height: 44px; min-width: 44px; }
+}
 @media (max-width: 680px) {
   .topbar-inner, .layout { padding-inline: 16px; }
   .topbar-inner { min-height: 67px; }
